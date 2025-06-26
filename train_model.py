@@ -32,3 +32,4 @@ model.fit(X_train, y_train)
 joblib.dump(model, "model.pkl")
 joblib.dump(scaler, "scaler.pkl")
 joblib.dump(X.columns.tolist(), "columns.pkl")
+#.
