@@ -1,65 +1,80 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.model_selection import train_test_split
+import joblib
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import KBinsDiscretizer, StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score, roc_curve
+import matplotlib.pyplot as plt
+import os
 
-st.set_page_config(page_title="Prediksi Kanker Serviks", layout="centered")
-st.title("🧠 Prediksi Risiko Kanker Serviks (Biopsy)")
-st.markdown("Model ini dilatih dari data asli dan dapat memprediksi hasil Biopsy berdasarkan gejala pasien.")
+st.title("Prediksi Risiko Kanker Serviks")
 
-# === 1. Load dan Preprocessing CSV asli ===
-@st.cache_data
-def load_and_train_model():
-    # Load data
-    df = pd.read_csv("risk_factors_cervical_cancer.csv")
+# === Load dataset langsung dari file lokal ===
+df = pd.read_csv("risk_factors_cervical_cancer.csv")
 
-    # Replace '?' dan ubah ke float
-    df.replace("?", np.nan, inplace=True)
-    for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+st.subheader("Data Awal")
+st.dataframe(df.head())
 
-    # Imputasi missing values
-    imputer = SimpleImputer(strategy='median')
-    df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+# === Preprocessing ===
+df.replace('?', np.nan, inplace=True)
+for col in df.columns:
+    df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # Fitur dan target
-    X = df_imputed.drop("Biopsy", axis=1)
-    y = df_imputed["Biopsy"]
+imputer = SimpleImputer(strategy='median')
+df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
 
-    # Scaling
+if 'Age' in df_imputed.columns:
+    binner = KBinsDiscretizer(n_bins=3, encode='ordinal', strategy='uniform')
+    df_imputed['Age_binned'] = binner.fit_transform(df_imputed[['Age']])
+
+if 'Biopsy' in df_imputed.columns:
+    X = df_imputed.drop('Biopsy', axis=1)
+    y = df_imputed['Biopsy']
+
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # Split dan latih model Decision Tree
     X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
-    model = DecisionTreeClassifier(max_depth=5, random_state=42)
-    model.fit(X_train, y_train)
 
-    return model, X.columns, scaler
+    # === Training dan Simpan Model ===
+    model_path = "decision_tree_model.pkl"
+    if not os.path.exists(model_path):
+        model = DecisionTreeClassifier(max_depth=5, random_state=42)
+        model.fit(X_train, y_train)
+        joblib.dump(model, model_path)
+    else:
+        model = joblib.load(model_path)
 
-model, feature_names, scaler = load_and_train_model()
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
 
-# === 2. Form Input User ===
-st.subheader("📋 Masukkan Data Pasien")
+    st.subheader("Evaluasi Model Decision Tree")
+    st.write(f"Akurasi: {acc:.4f}")
+    st.text("Confusion Matrix:")
+    st.write(cm)
+    st.text("Classification Report:")
+    st.text(classification_report(y_test, y_pred, target_names=["No", "Yes"]))
 
-user_input = {}
-for feature in feature_names:
-    val = st.number_input(f"{feature}", min_value=0.0, step=0.1, value=0.0)
-    user_input[feature] = val
+    try:
+        y_proba = model.predict_proba(X_test)[:, 1]
+        roc_auc = roc_auc_score(y_test, y_proba)
+        fpr, tpr, _ = roc_curve(y_test, y_proba)
 
-input_df = pd.DataFrame([user_input])
-st.write("Data Input Anda:")
-st.dataframe(input_df)
+        fig, ax = plt.subplots()
+        ax.plot(fpr, tpr, label=f"ROC Curve (AUC = {roc_auc:.2f})")
+        ax.plot([0, 1], [0, 1], 'k--')
+        ax.set_xlabel("False Positive Rate")
+        ax.set_ylabel("True Positive Rate")
+        ax.set_title("ROC Curve")
+        ax.legend()
+        st.pyplot(fig)
+    except:
+        st.warning("ROC-AUC tidak bisa dihitung.")
 
-# === 3. Preprocess input dan prediksi ===
-scaled_input = scaler.transform(input_df)
-prediction = model.predict(scaled_input)[0]
-pred_label = "✅ Tidak Terindikasi Kanker Serviks" if prediction == 0 else "⚠️ Terindikasi Kanker Serviks"
-
-st.subheader("📌 Hasil Prediksi:")
-st.success(pred_label)
-#.
+    st.success("Model siap digunakan untuk prediksi.")
+else:
+    st.error("Kolom 'Biopsy' tidak ditemukan dalam dataset.")
