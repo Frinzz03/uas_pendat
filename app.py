@@ -62,3 +62,4 @@ pred_label = "✅ Tidak Terindikasi Kanker Serviks" if prediction == 0 else "⚠
 
 st.subheader("📌 Hasil Prediksi:")
 st.success(pred_label)
+#.
