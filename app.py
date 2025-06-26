@@ -2,79 +2,43 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import KBinsDiscretizer, StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score, roc_curve
-import matplotlib.pyplot as plt
-import os
 
-st.title("Prediksi Risiko Kanker Serviks")
+st.set_page_config(page_title="Prediksi Kanker Serviks", layout="wide")
+st.title("🧬 Prediksi Risiko Kanker Serviks")
 
-# === Load dataset langsung dari file lokal ===
-df = pd.read_csv("risk_factors_cervical_cancer.csv")
+# Load model, scaler, dan kolom
+model = joblib.load("model.pkl")
+scaler = joblib.load("scaler.pkl")
+columns = joblib.load("columns.pkl")
 
-st.subheader("Data Awal")
-st.dataframe(df.head())
+# Load data mentah untuk ditampilkan
+try:
+    df_raw = pd.read_csv("risk_factors_cervical_cancer.csv")
+    df_raw.replace("?", np.nan, inplace=True)
+    st.subheader("📊 Dataset Mentah")
+    st.dataframe(df_raw)
+except FileNotFoundError:
+    st.warning("File dataset tidak ditemukan. Pastikan 'risk_factors_cervical_cancer.csv' tersedia.")
 
-# === Preprocessing ===
-df.replace('?', np.nan, inplace=True)
-for col in df.columns:
-    df[col] = pd.to_numeric(df[col], errors='coerce')
+# Form input manual
+st.subheader("📝 Input Data Pasien")
+with st.form("form_prediksi"):
+    input_data = []
+    for col in columns:
+        val = st.number_input(f"{col}", value=0.0, step=1.0, format="%.2f")
+        input_data.append(val)
+    submit = st.form_submit_button("🔍 Prediksi")
 
-imputer = SimpleImputer(strategy='median')
-df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
-
-if 'Age' in df_imputed.columns:
-    binner = KBinsDiscretizer(n_bins=3, encode='ordinal', strategy='uniform')
-    df_imputed['Age_binned'] = binner.fit_transform(df_imputed[['Age']])
-
-if 'Biopsy' in df_imputed.columns:
-    X = df_imputed.drop('Biopsy', axis=1)
-    y = df_imputed['Biopsy']
-
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
-
-    # === Training dan Simpan Model ===
-    model_path = "decision_tree_model.pkl"
-    if not os.path.exists(model_path):
-        model = DecisionTreeClassifier(max_depth=5, random_state=42)
-        model.fit(X_train, y_train)
-        joblib.dump(model, model_path)
-    else:
-        model = joblib.load(model_path)
-
-    y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    cm = confusion_matrix(y_test, y_pred)
-
-    st.subheader("Evaluasi Model Decision Tree")
-    st.write(f"Akurasi: {acc:.4f}")
-    st.text("Confusion Matrix:")
-    st.write(cm)
-    st.text("Classification Report:")
-    st.text(classification_report(y_test, y_pred, target_names=["No", "Yes"]))
-
+if submit:
     try:
-        y_proba = model.predict_proba(X_test)[:, 1]
-        roc_auc = roc_auc_score(y_test, y_proba)
-        fpr, tpr, _ = roc_curve(y_test, y_proba)
+        input_array = np.array(input_data).reshape(1, -1)
+        input_scaled = scaler.transform(input_array)
+        pred = model.predict(input_scaled)[0]
+        prob = model.predict_proba(input_scaled)[0][1]
 
-        fig, ax = plt.subplots()
-        ax.plot(fpr, tpr, label=f"ROC Curve (AUC = {roc_auc:.2f})")
-        ax.plot([0, 1], [0, 1], 'k--')
-        ax.set_xlabel("False Positive Rate")
-        ax.set_ylabel("True Positive Rate")
-        ax.set_title("ROC Curve")
-        ax.legend()
-        st.pyplot(fig)
-    except:
-        st.warning("ROC-AUC tidak bisa dihitung.")
-
-    st.success("Model siap digunakan untuk prediksi.")
-else:
-    st.error("Kolom 'Biopsy' tidak ditemukan dalam dataset.")
+        st.subheader("📈 Hasil Prediksi")
+        st.success(f"Prediksi: {'Berisiko (Biopsy = 1)' if pred == 1 else 'Tidak Berisiko (Biopsy = 0)'}")
+        st.info(f"Probabilitas Risiko: {prob:.2%}")
+    except Exception as e:
+        st.error("Terjadi kesalahan saat melakukan prediksi.")
+        st.exception(e)
